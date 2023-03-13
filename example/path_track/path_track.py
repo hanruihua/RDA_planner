@@ -21,7 +21,7 @@ def main():
     
     obs_list = env.get_obstacle_list()
 
-    mpc_opt = MPC(car_tuple, ref_path_list, receding=10, sample_time=env.step_time, process_num=1, obstacle_list=obs_list)
+    mpc_opt = MPC(car_tuple, ref_path_list, receding=10, sample_time=env.step_time, process_num=1)
     
     for i in range(500):   
         
