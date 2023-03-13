@@ -1,9 +1,10 @@
 import numpy as np
 from math import inf, sqrt, pi, sin, cos, tan
 from RDA_planner.rda_solver import RDA_solver
+import time
 
 class MPC:
-    def __init__(self, car_tuple, obstacle_list, ref_path, receding=10, sample_time=0.1, iter_num=4, enable_reverse=False, **kwargs) -> None:
+    def __init__(self, car_tuple, ref_path, receding=10, sample_time=0.1, iter_num=4, enable_reverse=False, **kwargs) -> None:
 
         '''
         Agruments 
@@ -37,14 +38,18 @@ class MPC:
         # flag
         self.cur_index = 0
         self.ref_path = ref_path
-        self.rda = RDA_solver(receding, car_tuple, obstacle_list, iter_num, sample_time, **kwargs)
+
+        start_time = time.time()
+        self.rda = RDA_solver(receding, car_tuple, iter_num=iter_num, **kwargs)
+        print( time.time() - start_time)
+
         self.enable_reverse = enable_reverse
 
         if enable_reverse:
             self.curve_list = self.split_path(self.ref_path)
             self.curve_index = 0
 
-    def control(self, state, ref_speed=6, **kwargs):
+    def control(self, state,  ref_speed=5, obs_list=[],**kwargs):
 
         if np.shape(state)[0] > 3:
             state = state[0:3]
@@ -58,7 +63,7 @@ class MPC:
 
         state_pre_array, ref_traj_list, self.cur_index = self.pre_process(state, cur_ref_path, self.cur_index, ref_speed, **kwargs)
 
-        u_opt_array, info = self.rda.iterative_solve(state_pre_array, self.cur_vel_array, ref_traj_list, gear_flag*ref_speed, **kwargs)
+        u_opt_array, info = self.rda.iterative_solve(state_pre_array, self.cur_vel_array, ref_traj_list, gear_flag*ref_speed, obs_list, **kwargs)
 
         if self.cur_index == len(cur_ref_path) - 1:
 
