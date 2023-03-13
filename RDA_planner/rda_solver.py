@@ -35,6 +35,7 @@ class RDA_solver:
         self.obstacle_template_num = sum([ ot['obstacle_num'] for ot in obstacle_template_list])
 
         self.obstacle_list = obstacle_list
+        # self.obstacle_list.reverse()
 
         self.iter_num = iter_num
         self.dt = step_time
@@ -122,9 +123,9 @@ class RDA_solver:
                 oen = ot['edge_num'] # obstacle edge number
                 ren = self.car_tuple.G.shape[0]  # robot edge number
 
-                self.para_lam_list += [ cp.Parameter((oen, self.T+1), value=0.1*np.ones((oen, self.T+1)), name='para_lam_'+ str(oen) + '_'  + str(index)) ]
-                self.para_mu_list += [ cp.Parameter((ren, self.T+1), value=np.ones((ren, self.T+1)), name='para_mu_'+ str(oen) + '_'  + str(index)) ]
-                self.para_z_list += [ cp.Parameter((1, self.T), nonneg=True, value=0.01*np.ones((1, self.T)), name='para_z_'+ str(oen) + '_'  + str(index))]
+                self.para_lam_list += [ cp.Parameter((oen, self.T+1), value=np.zeros((oen, self.T+1)), name='para_lam_'+ str(oen) + '_'  + str(index)) ]
+                self.para_mu_list += [ cp.Parameter((ren, self.T+1), value=np.zeros((ren, self.T+1)), name='para_mu_'+ str(oen) + '_'  + str(index)) ]
+                self.para_z_list += [ cp.Parameter((1, self.T), nonneg=True, value=np.zeros((1, self.T)), name='para_z_'+ str(oen) + '_'  + str(index))]
                 self.para_xi_list += [ cp.Parameter((self.T+1, 2), value=np.zeros((self.T+1, 2)), name='para_xi_'+ str(oen) + '_'  + str(index))]
                 self.para_zeta_list += [ cp.Parameter((1, self.T), value = np.zeros((1, self.T)), name='para_zeta_'+ str(oen) + '_' + str(index))]
 
@@ -231,7 +232,9 @@ class RDA_solver:
             para_obsA_rot = self.para_obsA_rot_list[obs_index]
             para_obsA_trans = self.para_obsA_trans_list[obs_index]
 
-            cost, constraints = self.LamMuZ_cost_cons(indep_lam, indep_mu, indep_z, self.para_s, self.para_rot_list, para_xi, self.para_dis, para_zeta, para_obs, para_obsA_rot, para_obsA_trans, self.T, ro1, ro2)
+            obs = self.obstacle_list[obs_index]
+
+            cost, constraints = self.LamMuZ_cost_cons(indep_lam, indep_mu, indep_z, self.para_s, self.para_rot_list, para_xi, self.para_dis, para_zeta, para_obs, para_obsA_rot, para_obsA_trans, self.T, ro1, ro2, obs)
             
             prob = cp.Problem(cp.Minimize(cost), constraints)
 
@@ -348,13 +351,13 @@ class RDA_solver:
 
         return cost, constraints
 
-    def LamMuZ_cost_cons(self, indep_lam, indep_mu, indep_z, para_s, para_rot_list, para_xi, para_dis, para_zeta, para_obs, para_obsA_rot, para_obsA_trans, receding, ro1, ro2):
+    def LamMuZ_cost_cons(self, indep_lam, indep_mu, indep_z, para_s, para_rot_list, para_xi, para_dis, para_zeta, para_obs, para_obsA_rot, para_obsA_trans, receding, ro1, ro2, obs):
 
         cost = 0
         constraints = []
 
-        Hm_array = self.Hm_LamMu(indep_lam, indep_mu, para_rot_list, para_xi, para_obs, receding, para_obsA_rot)
-        Im_array = self.Im_LamMu(indep_lam, indep_mu, indep_z, para_s, para_dis, para_zeta, para_obs, para_obsA_trans)
+        Hm_array = self.Hm_LamMu(indep_lam, indep_mu, para_rot_list, para_xi, para_obs, receding, para_obsA_rot, obs)
+        Im_array = self.Im_LamMu(indep_lam, indep_mu, indep_z, para_s, para_dis, para_zeta, para_obs, para_obsA_trans, obs)
 
         cost += 0.5*ro1 * cp.sum_squares(cp.neg(Im_array))
         # constraints += [ Im_array >= 0 ]
@@ -368,9 +371,10 @@ class RDA_solver:
         
         temp = cp.max(cp.vstack(temp_list))
 
-        constraints += [ temp <= 1 ]
-        # constraints += [ cp.norm(para_obs.A.T @ indep_lam, axis=0) <= 1 ]
-        constraints += [ self.cone_cp_array(-indep_lam, para_obs['cone_type']) ]
+        # constraints += [ temp <= 1 ]
+        constraints += [ cp.norm(obs.A.T @ indep_lam, axis=0) <= 1 ]
+        constraints += [ self.cone_cp_array(-indep_lam, obs.cone_type) ]
+        # constraints += [ self.cone_cp_array(-indep_lam, para_obs['cone_type']) ]
         constraints += [ self.cone_cp_array(-indep_mu, self.car_tuple.cone_type) ]
 
         return cost, constraints
@@ -425,10 +429,7 @@ class RDA_solver:
             self.para_lam_list[index].value = LamMuZ[0]
             self.para_mu_list[index].value = LamMuZ[1]
             self.para_z_list[index].value = LamMuZ[2]
-
-        a = 1
         
-
     def assign_obstacle_parameter(self, obstacle_list):
         
         # self.obstacle_template_list
@@ -482,6 +483,8 @@ class RDA_solver:
                 self.para_obsA_rot_list[n][t+1].value = obsA @ rot
                 self.para_obsA_trans_list[n][t+1].value = obsA @ trans
 
+
+
     # endregion
     
     # region: solve the problem
@@ -525,7 +528,7 @@ class RDA_solver:
     def rda_solver(self):
         
         resi_dual, resi_pri = 0, 0
-        
+    
         nom_s, nom_u, nom_dis = self.su_prob_solve()
 
         self.assign_state_parameter(nom_s, nom_u, nom_dis)
@@ -535,6 +538,7 @@ class RDA_solver:
         # if self.obstacle_template_num != 0:
             LamMuZ_list, resi_dual = self.LamMuZ_prob_solve()
             self.assign_dual_parameter(LamMuZ_list)
+            self.assign_combine_parameter()
                 
             resi_pri = self.update_xi()
             self.update_zeta()
@@ -623,7 +627,7 @@ class RDA_solver:
             LamMuZ_list = pool.map(RDA_solver.solve_parallel, input_args)
 
         else:
-            for obs_index in range(len(self.obstacle_template_list)):
+            for obs_index in range(self.obstacle_template_num):
                 prob = self.prob_LamMuZ_list[obs_index]
                 input_args.append((prob, obs_index))
             
@@ -723,15 +727,19 @@ class RDA_solver:
             para_obsA_lam_t = para_obsA_lam[t+1:t+2, :]
             para_obsb_lam_t = para_obsb_lam[t+1:t+2, :]
             
-            Im = para_lam_t.T @ obs.A @ indep_trans_t - para_lam_t.T @ obs.b - para_mu_t.T @ self.car_tuple.h
-            # Im = para_obsA_lam_t @ indep_trans_t - para_obsb_lam_t - para_mu_t.T @ self.car_tuple.h
+            temp1 = para_lam_t.T @ obs.A 
+            temp2 = para_obsA_lam_t
+
+            
+            # Im = para_lam_t.T @ obs.A @ indep_trans_t - para_lam_t.T @ obs.b - para_mu_t.T @ self.car_tuple.h
+            Im = para_obsA_lam_t @ indep_trans_t - para_obsb_lam_t - para_mu_t.T @ self.car_tuple.h
             Im_list.append(Im)
 
         Im_array = cp.hstack(Im_list)
 
         return Im_array[0, :] - distance[0, :] - para_z[0, :] + para_zeta[0, :]
 
-    def Hm_su(self, rot, para_mu, para_lam, para_xi, para_obs, receding, para_obsA_lam):
+    def Hm_su(self, rot, para_mu, para_lam, para_xi, para_obs, receding, para_obsA_lam, obs):
         
         Hm_list = []
 
@@ -747,12 +755,13 @@ class RDA_solver:
             para_obsA_lam_t = para_obsA_lam[t+1:t+2, :]
 
             Hmt = mu_t.T @ self.car_tuple.G + para_obsA_lam_t @ indep_rot_t + para_xi_t
+            # Hmt = mu_t.T @ self.car_tuple.G + lam_t.T @ obs.A @ indep_rot_t + para_xi_t
 
             Hm_list.append(Hmt)
 
         return cp.vstack(Hm_list)
 
-    def Hm_LamMu(self, indep_lam, indep_mu, para_rot_list, para_xi, para_obs, receding, para_obsA_rot):
+    def Hm_LamMu(self, indep_lam, indep_mu, para_rot_list, para_xi, para_obs, receding, para_obsA_rot, obs):
 
         Hm_list = []
         for t in range(receding):
@@ -763,13 +772,15 @@ class RDA_solver:
             para_xi_t = para_xi[t+1:t+2, :]
 
             para_obsA_rot_t = para_obsA_rot[t+1]
-        
-            Hmt = indep_mu_t.T @ self.car_tuple.G + indep_lam_t.T @ para_obsA_rot_t + para_xi_t
+
+
+            Hmt = indep_mu_t.T @ self.car_tuple.G + indep_lam_t.T @ obs.A @ para_rot_t + para_xi_t
+            # Hmt = indep_mu_t.T @ self.car_tuple.G + indep_lam_t.T @ para_obsA_rot_t + para_xi_t
             Hm_list.append(Hmt)
 
         return cp.vstack(Hm_list)
 
-    def Im_LamMu(self, indep_lam, indep_mu, indep_z, para_s, para_dis, para_zeta, para_obs, para_obsA_trans):
+    def Im_LamMu(self, indep_lam, indep_mu, indep_z, para_s, para_dis, para_zeta, para_obs, para_obsA_trans, obs):
 
         # Im_array = cp.diag( indep_lam.T @ obs.A @ para_s[0:2] - indep_lam.T @ obs.b - indep_mu.T @ self.car_tuple.h ) 
         Im_list = []
@@ -780,7 +791,8 @@ class RDA_solver:
             para_obsbt = para_obs['b'][t+1]
             para_obsA_trans_t = para_obsA_trans[t+1]
 
-            Im = indep_lam_t.T @ para_obsA_trans_t - indep_lam_t.T @ para_obsbt - indep_mu_t.T @ self.car_tuple.h
+            Im = indep_lam_t.T @ obs.A @ para_s[0:2, t+1:t+2] - indep_lam_t.T @ para_obsbt - indep_mu_t.T @ self.car_tuple.h
+            # Im = indep_lam_t.T @ para_obsA_trans_t - indep_lam_t.T @ para_obsbt - indep_mu_t.T @ self.car_tuple.h
             Im_list.append(Im)
 
         Im_array = cp.hstack(Im_list)
